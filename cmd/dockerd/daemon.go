@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/docker/docker/api/server/router/container"
 	"github.com/docker/docker/api/server/router/image"
 	"github.com/docker/docker/api/server/router/network"
+	pluginrouter "github.com/docker/docker/api/server/router/plugin"
 	swarmrouter "github.com/docker/docker/api/server/router/swarm"
 	systemrouter "github.com/docker/docker/api/server/router/system"
 	"github.com/docker/docker/api/server/router/volume"
@@ -38,6 +40,7 @@ import (
 	"github.com/docker/docker/pkg/plugingetter"
 	"github.com/docker/docker/pkg/signal"
 	"github.com/docker/docker/pkg/system"
+	"github.com/docker/docker/plugin"
 	"github.com/docker/docker/registry"
 	"github.com/docker/docker/runconfig"
 	"github.com/docker/docker/utils"
@@ -65,10 +68,15 @@ func NewDaemonCli() *DaemonCli {
 	return &DaemonCli{}
 }
 
-func migrateKey() (err error) {
+func migrateKey(config *daemon.Config) (err error) {
+	// No migration necessary on Windows
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+
 	// Migrate trust key if exists at ~/.docker/key.json and owned by current user
 	oldPath := filepath.Join(cliconfig.ConfigDir(), cliflags.DefaultTrustKeyFile)
-	newPath := filepath.Join(getDaemonConfDir(), cliflags.DefaultTrustKeyFile)
+	newPath := filepath.Join(getDaemonConfDir(config.Root), cliflags.DefaultTrustKeyFile)
 	if _, statErr := os.Stat(newPath); os.IsNotExist(statErr) && currentUserIsOwner(oldPath) {
 		defer func() {
 			// Ensure old path is removed if no error occurred
@@ -80,7 +88,7 @@ func migrateKey() (err error) {
 			}
 		}()
 
-		if err := system.MkdirAll(getDaemonConfDir(), os.FileMode(0644)); err != nil {
+		if err := system.MkdirAll(getDaemonConfDir(config.Root), os.FileMode(0644)); err != nil {
 			return fmt.Errorf("Unable to create daemon configuration directory: %s", err)
 		}
 
@@ -115,16 +123,17 @@ func (cli *DaemonCli) start(opts daemonOptions) (err error) {
 
 	opts.common.SetDefaultOptions(opts.flags)
 
-	if opts.common.TrustKey == "" {
-		opts.common.TrustKey = filepath.Join(
-			getDaemonConfDir(),
-			cliflags.DefaultTrustKeyFile)
-	}
 	if cli.Config, err = loadDaemonCliConfig(opts); err != nil {
 		return err
 	}
 	cli.configFile = &opts.configFile
 	cli.flags = opts.flags
+
+	if opts.common.TrustKey == "" {
+		opts.common.TrustKey = filepath.Join(
+			getDaemonConfDir(cli.Config.Root),
+			cliflags.DefaultTrustKeyFile)
+	}
 
 	if cli.Config.Debug {
 		utils.EnableDebug()
@@ -147,6 +156,12 @@ func (cli *DaemonCli) start(opts daemonOptions) (err error) {
 		if err := logger.ValidateLogOpts(cli.LogConfig.Type, cli.LogConfig.Config); err != nil {
 			return fmt.Errorf("Failed to set log opts: %v", err)
 		}
+	}
+
+	// Create the daemon root before we create ANY other files (PID, or migrate keys)
+	// to ensure the appropriate ACL is set (particularly relevant on Windows)
+	if err := daemon.CreateDaemonRoot(cli.Config); err != nil {
+		return err
 	}
 
 	if cli.Pidfile != "" {
@@ -228,9 +243,10 @@ func (cli *DaemonCli) start(opts daemonOptions) (err error) {
 		api.Accept(addr, ls...)
 	}
 
-	if err := migrateKey(); err != nil {
+	if err := migrateKey(cli.Config); err != nil {
 		return err
 	}
+
 	// FIXME: why is this down here instead of with the other TrustKey logic above?
 	cli.TrustKeyPath = opts.common.TrustKey
 
@@ -456,7 +472,8 @@ func initRouter(s *apiserver.Server, d *daemon.Daemon, c *cluster.Cluster) {
 		systemrouter.NewRouter(d, c),
 		volume.NewRouter(d),
 		build.NewRouter(dockerfile.NewBuildManager(d)),
-		swarmrouter.NewRouter(c),
+		swarmrouter.NewRouter(d, c),
+		pluginrouter.NewRouter(plugin.GetManager()),
 	}...)
 
 	if d.NetworkControllerEnabled() {
@@ -479,9 +496,6 @@ func (cli *DaemonCli) initMiddlewares(s *apiserver.Server, cfg *apiserver.Config
 		c := middleware.NewCORSMiddleware(cfg.CorsHeaders)
 		s.UseMiddleware(c)
 	}
-
-	u := middleware.NewUserAgentMiddleware(v)
-	s.UseMiddleware(u)
 
 	if err := validateAuthzPlugins(cli.Config.AuthorizationPlugins, cli.d.PluginStore); err != nil {
 		return fmt.Errorf("Error validating authorization plugin: %v", err)

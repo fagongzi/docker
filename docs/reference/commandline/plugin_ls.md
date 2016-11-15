@@ -2,7 +2,6 @@
 title: "plugin ls"
 description: "The plugin ls command description and usage"
 keywords: "plugin, list"
-advisory: "experimental"
 ---
 
 <!-- This file is maintained within the docker/docker Github
@@ -14,7 +13,7 @@ advisory: "experimental"
      will be rejected.
 -->
 
-# plugin ls (experimental)
+# plugin ls
 
 ```markdown
 Usage:  docker plugin ls [OPTIONS]
@@ -43,9 +42,11 @@ tiborvass/no-remove   latest              A test plugin for Docker   true
 
 ## Related information
 
-* [plugin enable](plugin_enable.md)
+* [plugin create](plugin_create.md)
 * [plugin disable](plugin_disable.md)
+* [plugin enable](plugin_enable.md)
 * [plugin inspect](plugin_inspect.md)
 * [plugin install](plugin_install.md)
+* [plugin push](plugin_push.md)
 * [plugin rm](plugin_rm.md)
 * [plugin set](plugin_set.md)

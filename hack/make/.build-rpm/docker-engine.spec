@@ -24,9 +24,15 @@ Packager: Docker <support@docker.com>
 BuildRequires: systemd-rpm-macros
 %{?systemd_requires}
 %else
+%if 0%{?fedora} >= 25
+# Systemd 230 and up no longer have libsystemd-journal (see https://bugzilla.redhat.com/show_bug.cgi?id=1350301)
+BuildRequires: pkgconfig(systemd)
+Requires: systemd-units
+%else
 BuildRequires: pkgconfig(systemd)
 Requires: systemd-units
 BuildRequires: pkgconfig(libsystemd-journal)
+%endif
 %endif
 %else
 Requires(post): chkconfig
@@ -138,7 +144,7 @@ install -p -m 755 /usr/local/bin/docker-containerd-ctr $RPM_BUILD_ROOT/%{_bindir
 # install runc
 install -p -m 755 /usr/local/bin/docker-runc $RPM_BUILD_ROOT/%{_bindir}/docker-runc
 
-# install grimes
+# install tini
 install -p -m 755 /usr/local/bin/docker-init $RPM_BUILD_ROOT/%{_bindir}/docker-init
 
 # install udev rules

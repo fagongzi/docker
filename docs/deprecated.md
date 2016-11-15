@@ -20,28 +20,60 @@ The following list of features are deprecated in Engine.
 To learn more about Docker Engine's deprecation policy,
 see [Feature Deprecation Policy](https://docs.docker.com/engine/#feature-deprecation-policy).
 
+## `filter` param for `/images/json` endpoint
+**Deprecated In Release: [v1.13](https://github.com/docker/docker/releases/tag/v1.13.0)**
+
+**Target For Removal In Release: v1.16**
+
+The `filter` param to filter the list of image by reference (name or name:tag) is now implemented as a regular filter, named `reference`.
 
 ### `repository:shortid` image references
-**Deprecated In Release: [v1.13](https://github.com/docker/docker/releases/)**
+**Deprecated In Release: [v1.13](https://github.com/docker/docker/releases/tag/v1.13.0)**
 
 **Target For Removal In Release: v1.16**
 
 `repository:shortid` syntax for referencing images is very little used, collides with with tag references can be confused with digest references.
 
 ### `docker daemon` subcommand
-**Deprecated In Release: [v1.13](https://github.com/docker/docker/releases/)**
+**Deprecated In Release: [v1.13](https://github.com/docker/docker/releases/tag/v1.13.0)**
 
 **Target For Removal In Release: v1.16**
 
 The daemon is moved to a separate binary (`dockerd`), and should be used instead.
 
 ### Duplicate keys with conflicting values in engine labels
-**Deprecated In Release: [v1.13](https://github.com/docker/docker/releases/)**
+**Deprecated In Release: [v1.13](https://github.com/docker/docker/releases/tag/v1.13.0)**
 
 **Target For Removal In Release: v1.16**
 
 Duplicate keys with conflicting values have been deprecated. A warning is displayed
 in the output, and an error will be returned in the future.
+
+### `MAINTAINER` in Dockerfile
+**Deprecated In Release: v1.13.0**
+
+`MAINTAINER` was an early very limited form of `LABEL` which should be used instead.
+
+### API calls without a version
+**Deprecated In Release: [v1.13](https://github.com/docker/docker/releases/)**
+
+**Target For Removal In Release: v1.16**
+
+API versions should be supplied to all API calls to ensure compatibility with
+future Engine versions. Instead of just requesting, for example, the URL
+`/containers/json`, you must now request `/v1.25/containers/json`.
+
+### Backing filesystem without `d_type` support for overlay/overlay2
+**Deprecated In Release: v1.13.0**
+
+**Target For Removal In Release: v1.16**
+
+The overlay and overlay2 storage driver does not work as expected if the backing
+filesystem does not support `d_type`. For example, XFS does not support `d_type`
+if it is formatted with the `ftype=0` option.
+
+Please also refer to [#27358](https://github.com/docker/docker/issues/27358) for
+further information.
 
 ### Three argument form in `docker import`
 **Deprecated In Release: [v0.6.7](https://github.com/docker/docker/releases/tag/v0.6.7)**
@@ -221,8 +253,3 @@ Since 1.9, Docker Content Trust Offline key has been renamed to Root key and the
 
 - DOCKER_CONTENT_TRUST_OFFLINE_PASSPHRASE is now named DOCKER_CONTENT_TRUST_ROOT_PASSPHRASE
 - DOCKER_CONTENT_TRUST_TAGGING_PASSPHRASE is now named DOCKER_CONTENT_TRUST_REPOSITORY_PASSPHRASE
-
-### `MAINTAINER` in Dockerfile
-**Deprecated In Release: v1.13.0**
-
-`MAINTAINER` was an early very limited form of `LABEL` which should be used instead.

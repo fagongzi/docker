@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/Sirupsen/logrus"
+	"github.com/docker/docker/api/types/versions"
 	"github.com/docker/docker/cli"
 	"github.com/docker/docker/cli/command"
 	"github.com/docker/docker/cli/command/commands"
@@ -47,16 +48,15 @@ func newDockerCommand(dockerCli *command.DockerCli) *cobra.Command {
 	cli.SetupRootCommand(cmd)
 
 	cmd.SetHelpFunc(func(ccmd *cobra.Command, args []string) {
-		var err error
 		if dockerCli.Client() == nil {
 			// flags must be the top-level command flags, not cmd.Flags()
 			opts.Common.SetDefaultOptions(flags)
 			dockerPreRun(opts)
-			err = dockerCli.Initialize(opts)
+			dockerCli.Initialize(opts)
 		}
-		if err != nil || !dockerCli.HasExperimental() {
-			hideExperimentalFeatures(ccmd)
-		}
+
+		hideUnsupportedFeatures(ccmd, dockerCli.Client().ClientVersion(), dockerCli.HasExperimental())
+
 		if err := ccmd.Help(); err != nil {
 			ccmd.Println(err)
 		}
@@ -79,7 +79,7 @@ func noArgs(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return fmt.Errorf(
-		"docker: '%s' is not a docker command.\nSee 'docker --help'%s", args[0], ".")
+		"docker: '%s' is not a docker command.\nSee 'docker --help'.", args[0])
 }
 
 func main() {
@@ -123,17 +123,32 @@ func dockerPreRun(opts *cliflags.ClientOptions) {
 	}
 }
 
-func hideExperimentalFeatures(cmd *cobra.Command) {
-	// hide flags
+func hideUnsupportedFeatures(cmd *cobra.Command, clientVersion string, hasExperimental bool) {
 	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		if _, ok := f.Annotations["experimental"]; ok {
+		// hide experimental flags
+		if !hasExperimental {
+			if _, ok := f.Annotations["experimental"]; ok {
+				f.Hidden = true
+			}
+		}
+
+		// hide flags not supported by the server
+		if flagVersion, ok := f.Annotations["version"]; ok && len(flagVersion) == 1 && versions.LessThan(clientVersion, flagVersion[0]) {
 			f.Hidden = true
 		}
+
 	})
 
 	for _, subcmd := range cmd.Commands() {
-		// hide subcommands
-		if _, ok := subcmd.Tags["experimental"]; ok {
+		// hide experimental subcommands
+		if !hasExperimental {
+			if _, ok := subcmd.Tags["experimental"]; ok {
+				subcmd.Hidden = true
+			}
+		}
+
+		// hide subcommands not supported by the server
+		if subcmdVersion, ok := subcmd.Tags["version"]; ok && versions.LessThan(clientVersion, subcmdVersion) {
 			subcmd.Hidden = true
 		}
 	}

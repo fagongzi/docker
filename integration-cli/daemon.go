@@ -154,7 +154,7 @@ func (d *Daemon) StartWithLogFile(out *os.File, providedArgs ...string) error {
 		fmt.Sprintf("--userland-proxy=%t", d.userlandProxy),
 	)
 	if experimentalDaemon {
-		args = append(args, "--experimental")
+		args = append(args, "--experimental", "--init")
 	}
 	if !(d.useDefaultHost || d.useDefaultTLSHost) {
 		args = append(args, []string{"--host", d.sock()}...)
@@ -463,9 +463,12 @@ func (d *Daemon) getBaseDeviceSize(c *check.C) int64 {
 // Cmd will execute a docker CLI command against this Daemon.
 // Example: d.Cmd("version") will run docker -H unix://path/to/unix.sock version
 func (d *Daemon) Cmd(args ...string) (string, error) {
-	c := exec.Command(dockerBinary, d.prependHostArg(args)...)
-	b, err := c.CombinedOutput()
+	b, err := d.command(args...).CombinedOutput()
 	return string(b), err
+}
+
+func (d *Daemon) command(args ...string) *exec.Cmd {
+	return exec.Command(dockerBinary, d.prependHostArg(args)...)
 }
 
 func (d *Daemon) prependHostArg(args []string) []string {

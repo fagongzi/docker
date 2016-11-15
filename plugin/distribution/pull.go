@@ -20,7 +20,7 @@ import (
 	"golang.org/x/net/context"
 )
 
-// PullData is the plugin manifest and the rootfs
+// PullData is the plugin config and the rootfs
 type PullData interface {
 	Config() ([]byte, error)
 	Layer() (io.ReadCloser, error)
@@ -153,7 +153,8 @@ func Pull(ref reference.Named, rs registry.Service, metaheader http.Header, auth
 		logrus.Debugf("pull.go: error in json.Unmarshal(): %v", err)
 		return nil, err
 	}
-	if m.Config.MediaType != schema2.MediaTypePluginConfig {
+	if m.Config.MediaType != schema2.MediaTypePluginConfig &&
+		m.Config.MediaType != "application/vnd.docker.plugin.image.v0+json" { //TODO: remove this v0 before 1.13 GA
 		return nil, ErrUnsupportedMediaType
 	}
 
@@ -183,7 +184,7 @@ func WritePullData(pd PullData, dest string, extract bool) error {
 	}
 
 	if extract {
-		if err := ioutil.WriteFile(filepath.Join(dest, "manifest.json"), config, 0600); err != nil {
+		if err := ioutil.WriteFile(filepath.Join(dest, "config.json"), config, 0600); err != nil {
 			return err
 		}
 

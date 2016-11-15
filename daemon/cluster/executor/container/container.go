@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,9 +18,11 @@ import (
 	volumetypes "github.com/docker/docker/api/types/volume"
 	clustertypes "github.com/docker/docker/daemon/cluster/provider"
 	"github.com/docker/docker/reference"
+	"github.com/docker/go-connections/nat"
 	"github.com/docker/swarmkit/agent/exec"
 	"github.com/docker/swarmkit/api"
 	"github.com/docker/swarmkit/protobuf/ptypes"
+	"github.com/docker/swarmkit/template"
 )
 
 const (
@@ -68,6 +71,17 @@ func (c *containerConfig) setTask(t *api.Task) error {
 	}
 
 	c.task = t
+
+	if t.Spec.GetContainer() != nil {
+		preparedSpec, err := template.ExpandContainerSpec(t)
+		if err != nil {
+			return err
+		}
+		c.task.Spec.Runtime = &api.TaskSpec_Container{
+			Container: preparedSpec,
+		}
+	}
+
 	return nil
 }
 
@@ -124,17 +138,62 @@ func (c *containerConfig) image() string {
 	return reference.WithDefaultTag(ref).String()
 }
 
+func (c *containerConfig) portBindings() nat.PortMap {
+	portBindings := nat.PortMap{}
+	if c.task.Endpoint == nil {
+		return portBindings
+	}
+
+	for _, portConfig := range c.task.Endpoint.Ports {
+		if portConfig.PublishMode != api.PublishModeHost {
+			continue
+		}
+
+		port := nat.Port(fmt.Sprintf("%d/%s", portConfig.TargetPort, strings.ToLower(portConfig.Protocol.String())))
+		binding := []nat.PortBinding{
+			{},
+		}
+
+		if portConfig.PublishedPort != 0 {
+			binding[0].HostPort = strconv.Itoa(int(portConfig.PublishedPort))
+		}
+		portBindings[port] = binding
+	}
+
+	return portBindings
+}
+
+func (c *containerConfig) exposedPorts() map[nat.Port]struct{} {
+	exposedPorts := make(map[nat.Port]struct{})
+	if c.task.Endpoint == nil {
+		return exposedPorts
+	}
+
+	for _, portConfig := range c.task.Endpoint.Ports {
+		if portConfig.PublishMode != api.PublishModeHost {
+			continue
+		}
+
+		port := nat.Port(fmt.Sprintf("%d/%s", portConfig.TargetPort, strings.ToLower(portConfig.Protocol.String())))
+		exposedPorts[port] = struct{}{}
+	}
+
+	return exposedPorts
+}
+
 func (c *containerConfig) config() *enginecontainer.Config {
 	config := &enginecontainer.Config{
-		Labels:      c.labels(),
-		Tty:         c.spec().TTY,
-		User:        c.spec().User,
-		Hostname:    c.spec().Hostname,
-		Env:         c.spec().Env,
-		WorkingDir:  c.spec().Dir,
-		Image:       c.image(),
-		Volumes:     c.volumes(),
-		Healthcheck: c.healthcheck(),
+		Labels:       c.labels(),
+		Tty:          c.spec().TTY,
+		OpenStdin:    c.spec().OpenStdin,
+		User:         c.spec().User,
+		Env:          c.spec().Env,
+		Hostname:     c.spec().Hostname,
+		WorkingDir:   c.spec().Dir,
+		Image:        c.image(),
+		Volumes:      c.volumes(),
+		ExposedPorts: c.exposedPorts(),
+		Healthcheck:  c.healthcheck(),
 	}
 
 	if len(c.spec().Command) > 0 {
@@ -321,10 +380,31 @@ func getMountMask(m *api.Mount) string {
 
 func (c *containerConfig) hostConfig() *enginecontainer.HostConfig {
 	hc := &enginecontainer.HostConfig{
-		Resources: c.resources(),
-		Binds:     c.binds(),
-		Tmpfs:     c.tmpfs(),
-		GroupAdd:  c.spec().Groups,
+		Resources:    c.resources(),
+		Binds:        c.binds(),
+		Tmpfs:        c.tmpfs(),
+		GroupAdd:     c.spec().Groups,
+		PortBindings: c.portBindings(),
+	}
+
+	if c.spec().DNSConfig != nil {
+		hc.DNS = c.spec().DNSConfig.Nameservers
+		hc.DNSSearch = c.spec().DNSConfig.Search
+		hc.DNSOptions = c.spec().DNSConfig.Options
+	}
+
+	// The format of extra hosts on swarmkit is specified in:
+	// http://man7.org/linux/man-pages/man5/hosts.5.html
+	//    IP_address canonical_hostname [aliases...]
+	// However, the format of ExtraHosts in HostConfig is
+	//    <host>:<ip>
+	// We need to do the conversion here
+	// (Alias is ignored for now)
+	for _, entry := range c.spec().Hosts {
+		parts := strings.Fields(entry)
+		if len(parts) > 1 {
+			hc.ExtraHosts = append(hc.ExtraHosts, fmt.Sprintf("%s:%s", parts[1], parts[0]))
+		}
 	}
 
 	if c.task.LogDriver != nil {
@@ -493,6 +573,10 @@ func (c *containerConfig) serviceConfig() *clustertypes.ServiceConfig {
 
 	if c.task.Endpoint != nil {
 		for _, ePort := range c.task.Endpoint.Ports {
+			if ePort.PublishMode != api.PublishModeIngress {
+				continue
+			}
+
 			svcCfg.ExposedPorts = append(svcCfg.ExposedPorts, &clustertypes.PortConfig{
 				Name:          ePort.Name,
 				Protocol:      int32(ePort.Protocol),

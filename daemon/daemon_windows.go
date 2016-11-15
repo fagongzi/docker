@@ -8,7 +8,6 @@ import (
 	"github.com/Microsoft/hcsshim"
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api/types"
-	pblkiodev "github.com/docker/docker/api/types/blkiodev"
 	containertypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/image"
@@ -20,6 +19,7 @@ import (
 	"github.com/docker/docker/runconfig"
 	"github.com/docker/libnetwork"
 	nwconfig "github.com/docker/libnetwork/config"
+	"github.com/docker/libnetwork/datastore"
 	winlibnetwork "github.com/docker/libnetwork/drivers/windows"
 	"github.com/docker/libnetwork/netlabel"
 	"github.com/docker/libnetwork/options"
@@ -83,31 +83,6 @@ func (daemon *Daemon) adaptContainerSettings(hostConfig *containertypes.HostConf
 		return nil
 	}
 
-	numCPU := int64(sysinfo.NumCPU())
-	if hostConfig.CPUCount < 0 {
-		logrus.Warnf("Changing requested CPUCount of %d to minimum allowed of %d", hostConfig.CPUCount, windowsMinCPUCount)
-		hostConfig.CPUCount = windowsMinCPUCount
-	} else if hostConfig.CPUCount > numCPU {
-		logrus.Warnf("Changing requested CPUCount of %d to current number of processors, %d", hostConfig.CPUCount, numCPU)
-		hostConfig.CPUCount = numCPU
-	}
-
-	if hostConfig.CPUShares < 0 {
-		logrus.Warnf("Changing requested CPUShares of %d to minimum allowed of %d", hostConfig.CPUShares, windowsMinCPUShares)
-		hostConfig.CPUShares = windowsMinCPUShares
-	} else if hostConfig.CPUShares > windowsMaxCPUShares {
-		logrus.Warnf("Changing requested CPUShares of %d to maximum allowed of %d", hostConfig.CPUShares, windowsMaxCPUShares)
-		hostConfig.CPUShares = windowsMaxCPUShares
-	}
-
-	if hostConfig.CPUPercent < 0 {
-		logrus.Warnf("Changing requested CPUPercent of %d to minimum allowed of %d", hostConfig.CPUPercent, windowsMinCPUPercent)
-		hostConfig.CPUPercent = windowsMinCPUPercent
-	} else if hostConfig.CPUPercent > windowsMaxCPUPercent {
-		logrus.Warnf("Changing requested CPUPercent of %d to maximum allowed of %d", hostConfig.CPUPercent, windowsMaxCPUPercent)
-		hostConfig.CPUPercent = windowsMaxCPUPercent
-	}
-
 	return nil
 }
 
@@ -138,48 +113,76 @@ func verifyContainerResources(resources *containertypes.Resources, isHyperv bool
 		}
 	}
 
-	if resources.NanoCPUs > 0 && resources.CPUPercent > 0 {
-		return warnings, fmt.Errorf("Conflicting options: Nano CPUs and CPU Percent cannot both be set")
+	if resources.CPUShares < 0 || resources.CPUShares > windowsMaxCPUShares {
+		return warnings, fmt.Errorf("range of CPUShares is from %d to %d", windowsMinCPUShares, windowsMaxCPUShares)
+	}
+	if resources.CPUPercent < 0 || resources.CPUPercent > windowsMaxCPUPercent {
+		return warnings, fmt.Errorf("range of CPUPercent is from %d to %d", windowsMinCPUPercent, windowsMaxCPUPercent)
+	}
+	if resources.CPUCount < 0 {
+		return warnings, fmt.Errorf("invalid CPUCount: CPUCount cannot be negative")
 	}
 
+	if resources.NanoCPUs > 0 && resources.CPUPercent > 0 {
+		return warnings, fmt.Errorf("conflicting options: Nano CPUs and CPU Percent cannot both be set")
+	}
 	if resources.NanoCPUs > 0 && resources.CPUShares > 0 {
-		return warnings, fmt.Errorf("Conflicting options: Nano CPUs and CPU Shares cannot both be set")
+		return warnings, fmt.Errorf("conflicting options: Nano CPUs and CPU Shares cannot both be set")
 	}
 	if resources.NanoCPUs < 0 || resources.NanoCPUs > int64(sysinfo.NumCPU())*1e9 {
-		return warnings, fmt.Errorf("Range of Nano CPUs is from 1 to %d", int64(sysinfo.NumCPU())*1e9)
+		return warnings, fmt.Errorf("range of Nano CPUs is from 1 to %d", int64(sysinfo.NumCPU())*1e9)
 	}
 
-	// TODO Windows: Add more validation of resource settings not supported on Windows
-
-	if resources.BlkioWeight > 0 {
-		warnings = append(warnings, "Windows does not support Block I/O weight. Block I/O weight discarded.")
-		logrus.Warn("Windows does not support Block I/O weight. Block I/O weight discarded.")
-		resources.BlkioWeight = 0
-	}
-	if len(resources.BlkioWeightDevice) > 0 {
-		warnings = append(warnings, "Windows does not support Block I/O weight-device. Weight-device discarded.")
-		logrus.Warn("Windows does not support Block I/O weight-device. Weight-device discarded.")
-		resources.BlkioWeightDevice = []*pblkiodev.WeightDevice{}
-	}
 	if len(resources.BlkioDeviceReadBps) > 0 {
-		warnings = append(warnings, "Windows does not support Block read limit in bytes per second. Device read bps discarded.")
-		logrus.Warn("Windows does not support Block I/O read limit in bytes per second. Device read bps discarded.")
-		resources.BlkioDeviceReadBps = []*pblkiodev.ThrottleDevice{}
-	}
-	if len(resources.BlkioDeviceWriteBps) > 0 {
-		warnings = append(warnings, "Windows does not support Block write limit in bytes per second. Device write bps discarded.")
-		logrus.Warn("Windows does not support Block I/O write limit in bytes per second. Device write bps discarded.")
-		resources.BlkioDeviceWriteBps = []*pblkiodev.ThrottleDevice{}
+		return warnings, fmt.Errorf("invalid option: Windows does not support BlkioDeviceReadBps")
 	}
 	if len(resources.BlkioDeviceReadIOps) > 0 {
-		warnings = append(warnings, "Windows does not support Block read limit in IO per second. Device read iops discarded.")
-		logrus.Warn("Windows does not support Block I/O read limit in IO per second. Device read iops discarded.")
-		resources.BlkioDeviceReadIOps = []*pblkiodev.ThrottleDevice{}
+		return warnings, fmt.Errorf("invalid option: Windows does not support BlkioDeviceReadIOps")
+	}
+	if len(resources.BlkioDeviceWriteBps) > 0 {
+		return warnings, fmt.Errorf("invalid option: Windows does not support BlkioDeviceWriteBps")
 	}
 	if len(resources.BlkioDeviceWriteIOps) > 0 {
-		warnings = append(warnings, "Windows does not support Block write limit in IO per second. Device write iops discarded.")
-		logrus.Warn("Windows does not support Block I/O write limit in IO per second. Device write iops discarded.")
-		resources.BlkioDeviceWriteIOps = []*pblkiodev.ThrottleDevice{}
+		return warnings, fmt.Errorf("invalid option: Windows does not support BlkioDeviceWriteIOps")
+	}
+	if resources.BlkioWeight > 0 {
+		return warnings, fmt.Errorf("invalid option: Windows does not support BlkioWeight")
+	}
+	if len(resources.BlkioWeightDevice) > 0 {
+		return warnings, fmt.Errorf("invalid option: Windows does not support BlkioWeightDevice")
+	}
+	if resources.CgroupParent != "" {
+		return warnings, fmt.Errorf("invalid option: Windows does not support CgroupParent")
+	}
+	if resources.CPUPeriod != 0 {
+		return warnings, fmt.Errorf("invalid option: Windows does not support CPUPeriod")
+	}
+	if resources.CpusetCpus != "" {
+		return warnings, fmt.Errorf("invalid option: Windows does not support CpusetCpus")
+	}
+	if resources.CpusetMems != "" {
+		return warnings, fmt.Errorf("invalid option: Windows does not support CpusetMems")
+	}
+	if resources.KernelMemory != 0 {
+		return warnings, fmt.Errorf("invalid option: Windows does not support KernelMemory")
+	}
+	if resources.MemoryReservation != 0 {
+		return warnings, fmt.Errorf("invalid option: Windows does not support MemoryReservation")
+	}
+	if resources.MemorySwap != 0 {
+		return warnings, fmt.Errorf("invalid option: Windows does not support MemorySwap")
+	}
+	if resources.MemorySwappiness != nil && *resources.MemorySwappiness != -1 {
+		return warnings, fmt.Errorf("invalid option: Windows does not support MemorySwappiness")
+	}
+	if resources.OomKillDisable != nil && *resources.OomKillDisable {
+		return warnings, fmt.Errorf("invalid option: Windows does not support OomKillDisable")
+	}
+	if resources.PidsLimit != 0 {
+		return warnings, fmt.Errorf("invalid option: Windows does not support PidsLimit")
+	}
+	if len(resources.Ulimits) != 0 {
+		return warnings, fmt.Errorf("invalid option: Windows does not support Ulimits")
 	}
 	return warnings, nil
 }
@@ -189,12 +192,18 @@ func verifyContainerResources(resources *containertypes.Resources, isHyperv bool
 func verifyPlatformContainerSettings(daemon *Daemon, hostConfig *containertypes.HostConfig, config *containertypes.Config, update bool) ([]string, error) {
 	warnings := []string{}
 
-	w, err := verifyContainerResources(&hostConfig.Resources, daemon.runAsHyperVContainer(hostConfig))
+	hyperv := daemon.runAsHyperVContainer(hostConfig)
+	if !hyperv && system.IsWindowsClient() {
+		// @engine maintainers. This block should not be removed. It partially enforces licensing
+		// restrictions on Windows. Ping @jhowardmsft if there are concerns or PRs to change this.
+		return warnings, fmt.Errorf("Windows client operating systems only support Hyper-V containers")
+	}
+
+	w, err := verifyContainerResources(&hostConfig.Resources, hyperv)
 	warnings = append(warnings, w...)
 	if err != nil {
 		return warnings, err
 	}
-
 	return warnings, nil
 }
 
@@ -261,9 +270,12 @@ func (daemon *Daemon) initNetworkController(config *Config, activeSandboxes map[
 		}
 
 		if !found {
-			err = v.Delete()
-			if err != nil {
-				return nil, err
+			// global networks should not be deleted by local HNS
+			if v.Info().Scope() != datastore.GlobalScope {
+				err = v.Delete()
+				if err != nil {
+					logrus.Errorf("Error occurred when removing network %v", err)
+				}
 			}
 		}
 	}
@@ -300,6 +312,10 @@ func (daemon *Daemon) initNetworkController(config *Config, activeSandboxes map[
 
 		controller.WalkNetworks(s)
 		if n != nil {
+			// global networks should not be deleted by local HNS
+			if n.Info().Scope() == datastore.GlobalScope {
+				continue
+			}
 			v.Name = n.Name()
 			// This will not cause network delete from HNS as the network
 			// is not yet populated in the libnetwork windows driver
@@ -416,7 +432,7 @@ func setupRemappedRoot(config *Config) ([]idtools.IDMap, []idtools.IDMap, error)
 func setupDaemonRoot(config *Config, rootDir string, rootUID, rootGID int) error {
 	config.Root = rootDir
 	// Create the root directory if it doesn't exists
-	if err := system.MkdirAll(config.Root, 0700); err != nil && !os.IsExist(err) {
+	if err := system.MkdirAllWithACL(config.Root, 0); err != nil && !os.IsExist(err) {
 		return err
 	}
 	return nil

@@ -24,14 +24,19 @@ const (
 // NetworkDB instance drives the networkdb cluster and acts the broker
 // for cluster-scoped and network-scoped gossip and watches.
 type NetworkDB struct {
+	// The clocks MUST be the first things
+	// in this struct due to Golang issue #599.
+
+	// Global lamport clock for node network attach events.
+	networkClock serf.LamportClock
+
+	// Global lamport clock for table events.
+	tableClock serf.LamportClock
+
 	sync.RWMutex
 
 	// NetworkDB configuration.
 	config *Config
-
-	// local copy of memberlist config that we use to driver
-	// network scoped gossip and bulk sync.
-	mConfig *memberlist.Config
 
 	// All the tree index (byTable, byNetwork) that we maintain
 	// the db.
@@ -57,18 +62,11 @@ type NetworkDB struct {
 
 	// A map of nodes which are participating in a given
 	// network. The key is a network ID.
-
 	networkNodes map[string][]string
 
 	// A table of ack channels for every node from which we are
 	// waiting for an ack.
 	bulkSyncAckTbl map[string]chan struct{}
-
-	// Global lamport clock for node network attach events.
-	networkClock serf.LamportClock
-
-	// Global lamport clock for table events.
-	tableClock serf.LamportClock
 
 	// Broadcast queue for network event gossip.
 	networkBroadcasts *memberlist.TransmitLimitedQueue

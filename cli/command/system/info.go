@@ -2,6 +2,7 @@ package system
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -96,7 +97,7 @@ func prettyPrintInfo(dockerCli *command.DockerCli, info types.Info) error {
 	}
 
 	fmt.Fprintf(dockerCli.Out(), "Swarm: %v\n", info.Swarm.LocalNodeState)
-	if info.Swarm.LocalNodeState != swarm.LocalNodeStateInactive {
+	if info.Swarm.LocalNodeState != swarm.LocalNodeStateInactive && info.Swarm.LocalNodeState != swarm.LocalNodeStateLocked {
 		fmt.Fprintf(dockerCli.Out(), " NodeID: %s\n", info.Swarm.NodeID)
 		if info.Swarm.Error != "" {
 			fmt.Fprintf(dockerCli.Out(), " Error: %v\n", info.Swarm.Error)
@@ -114,6 +115,9 @@ func prettyPrintInfo(dockerCli *command.DockerCli, info types.Info) error {
 			fmt.Fprintf(dockerCli.Out(), "  Task History Retention Limit: %d\n", taskHistoryRetentionLimit)
 			fmt.Fprintf(dockerCli.Out(), " Raft:\n")
 			fmt.Fprintf(dockerCli.Out(), "  Snapshot Interval: %d\n", info.Swarm.Cluster.Spec.Raft.SnapshotInterval)
+			if info.Swarm.Cluster.Spec.Raft.KeepOldSnapshots != nil {
+				fmt.Fprintf(dockerCli.Out(), "  Number of Old Snapshots to Retain: %d\n", *info.Swarm.Cluster.Spec.Raft.KeepOldSnapshots)
+			}
 			fmt.Fprintf(dockerCli.Out(), "  Heartbeat Tick: %d\n", info.Swarm.Cluster.Spec.Raft.HeartbeatTick)
 			fmt.Fprintf(dockerCli.Out(), "  Election Tick: %d\n", info.Swarm.Cluster.Spec.Raft.ElectionTick)
 			fmt.Fprintf(dockerCli.Out(), " Dispatcher:\n")
@@ -128,6 +132,17 @@ func prettyPrintInfo(dockerCli *command.DockerCli, info types.Info) error {
 			}
 		}
 		fmt.Fprintf(dockerCli.Out(), " Node Address: %s\n", info.Swarm.NodeAddr)
+		managers := []string{}
+		for _, entry := range info.Swarm.RemoteManagers {
+			managers = append(managers, entry.Addr)
+		}
+		if len(managers) > 0 {
+			sort.Strings(managers)
+			fmt.Fprintf(dockerCli.Out(), " Manager Addresses:\n")
+			for _, entry := range managers {
+				fmt.Fprintf(dockerCli.Out(), "  %s\n", entry)
+			}
+		}
 	}
 
 	if len(info.Runtimes) > 0 {
@@ -140,6 +155,22 @@ func prettyPrintInfo(dockerCli *command.DockerCli, info types.Info) error {
 	}
 
 	if info.OSType == "linux" {
+		fmt.Fprintf(dockerCli.Out(), "Init Binary: %v\n", info.InitBinary)
+
+		for _, ci := range []struct {
+			Name   string
+			Commit types.Commit
+		}{
+			{"containerd", info.ContainerdCommit},
+			{"runc", info.RuncCommit},
+			{"init", info.InitCommit},
+		} {
+			fmt.Fprintf(dockerCli.Out(), "%s version: %s", ci.Name, ci.Commit.ID)
+			if ci.Commit.ID != ci.Commit.Expected {
+				fmt.Fprintf(dockerCli.Out(), " (expected: %s)", ci.Commit.Expected)
+			}
+			fmt.Fprintf(dockerCli.Out(), "\n")
+		}
 		if len(info.SecurityOptions) != 0 {
 			fmt.Fprintf(dockerCli.Out(), "Security Options:\n")
 			for _, o := range info.SecurityOptions {

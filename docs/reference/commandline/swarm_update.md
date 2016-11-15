@@ -21,10 +21,13 @@ Usage:  docker swarm update [OPTIONS]
 Update the swarm
 
 Options:
-      --cert-expiry duration            Validity period for node certificates (default 2160h0m0s)
-      --dispatcher-heartbeat duration   Dispatcher heartbeat period (default 5s)
+      --autolock                        Change manager autolocking setting (true|false)
+      --cert-expiry duration            Validity period for node certificates (ns|us|ms|s|m|h) (default 2160h0m0s)
+      --dispatcher-heartbeat duration   Dispatcher heartbeat period (ns|us|ms|s|m|h) (default 5s)
       --external-ca value               Specifications of one or more certificate signing endpoints
       --help                            Print usage
+      --max-snapshots int               Number of additional Raft snapshots to retain
+      --snapshot-interval int           Number of log entries between Raft snapshots
       --task-history-limit int          Task history retention limit (default 5)
 ```
 

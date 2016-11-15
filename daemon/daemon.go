@@ -29,6 +29,7 @@ import (
 	"github.com/docker/docker/daemon/events"
 	"github.com/docker/docker/daemon/exec"
 	"github.com/docker/docker/dockerversion"
+	"github.com/docker/docker/plugin"
 	"github.com/docker/libnetwork/cluster"
 	// register graph drivers
 	_ "github.com/docker/docker/daemon/graphdriver/register"
@@ -65,6 +66,9 @@ var (
 	// DefaultRuntimeBinary is the default runtime to be used by
 	// containerd if none is specified
 	DefaultRuntimeBinary = "docker-runc"
+
+	// DefaultInitBinary is the name of the default init binary
+	DefaultInitBinary = "docker-init"
 
 	errSystemNotSupported = fmt.Errorf("The Docker daemon is not supported on this platform.")
 )
@@ -458,7 +462,7 @@ func NewDaemon(config *Config, registryService registry.Service, containerdRemot
 
 	// Ensure that we have a correct root key limit for launching containers.
 	if err := ModifyRootKeyLimit(); err != nil {
-		logrus.Warnf("unable to modify root key limit, number of containers could be limitied by this quota: %v", err)
+		logrus.Warnf("unable to modify root key limit, number of containers could be limited by this quota: %v", err)
 	}
 
 	// Ensure we have compatible and valid configuration options
@@ -485,21 +489,6 @@ func NewDaemon(config *Config, registryService registry.Service, containerdRemot
 	}
 	rootUID, rootGID, err := idtools.GetRootUIDGID(uidMaps, gidMaps)
 	if err != nil {
-		return nil, err
-	}
-
-	// get the canonical path to the Docker root directory
-	var realRoot string
-	if _, err := os.Stat(config.Root); err != nil && os.IsNotExist(err) {
-		realRoot = config.Root
-	} else {
-		realRoot, err = fileutils.ReadSymlinkedDirectory(config.Root)
-		if err != nil {
-			return nil, fmt.Errorf("Unable to get the full path to root (%s): %s", config.Root, err)
-		}
-	}
-
-	if err := setupDaemonRoot(config, realRoot, rootUID, rootGID); err != nil {
 		return nil, err
 	}
 
@@ -551,7 +540,7 @@ func NewDaemon(config *Config, registryService registry.Service, containerdRemot
 	}
 
 	if runtime.GOOS == "windows" {
-		if err := idtools.MkdirAllAs(filepath.Join(config.Root, "credentialspecs"), 0700, rootUID, rootGID); err != nil && !os.IsExist(err) {
+		if err := system.MkdirAll(filepath.Join(config.Root, "credentialspecs"), 0); err != nil && !os.IsExist(err) {
 			return nil, err
 		}
 	}
@@ -804,7 +793,7 @@ func (daemon *Daemon) Shutdown() error {
 		})
 	}
 
-	// Shutdown plugins after containers. Dont change the order.
+	// Shutdown plugins after containers. Don't change the order.
 	daemon.pluginShutdown()
 
 	// trigger libnetwork Stop only if it's initialized
@@ -854,6 +843,7 @@ func (daemon *Daemon) Unmount(container *container.Container) error {
 		logrus.Errorf("Error unmounting container %s: %s", container.ID, err)
 		return err
 	}
+
 	return nil
 }
 
@@ -1265,4 +1255,46 @@ func (daemon *Daemon) GetCluster() Cluster {
 // SetCluster sets the cluster
 func (daemon *Daemon) SetCluster(cluster Cluster) {
 	daemon.cluster = cluster
+}
+
+func (daemon *Daemon) pluginInit(cfg *Config, remote libcontainerd.Remote) error {
+	return plugin.Init(cfg.Root, daemon.PluginStore, remote, daemon.RegistryService, cfg.LiveRestoreEnabled, daemon.LogPluginEvent)
+}
+
+func (daemon *Daemon) pluginShutdown() {
+	manager := plugin.GetManager()
+	// Check for a valid manager object. In error conditions, daemon init can fail
+	// and shutdown called, before plugin manager is initialized.
+	if manager != nil {
+		manager.Shutdown()
+	}
+}
+
+// CreateDaemonRoot creates the root for the daemon
+func CreateDaemonRoot(config *Config) error {
+	// get the canonical path to the Docker root directory
+	var realRoot string
+	if _, err := os.Stat(config.Root); err != nil && os.IsNotExist(err) {
+		realRoot = config.Root
+	} else {
+		realRoot, err = fileutils.ReadSymlinkedDirectory(config.Root)
+		if err != nil {
+			return fmt.Errorf("Unable to get the full path to root (%s): %s", config.Root, err)
+		}
+	}
+
+	uidMaps, gidMaps, err := setupRemappedRoot(config)
+	if err != nil {
+		return err
+	}
+	rootUID, rootGID, err := idtools.GetRootUIDGID(uidMaps, gidMaps)
+	if err != nil {
+		return err
+	}
+
+	if err := setupDaemonRoot(config, realRoot, rootUID, rootGID); err != nil {
+		return err
+	}
+
+	return nil
 }

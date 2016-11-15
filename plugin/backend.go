@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -12,9 +13,11 @@ import (
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/pkg/archive"
+	"github.com/docker/docker/pkg/chrootarchive"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/docker/plugin/distribution"
 	"github.com/docker/docker/plugin/v2"
+	"golang.org/x/net/context"
 )
 
 // Disable deactivates a plugin, which implies that they cannot be used by containers.
@@ -43,7 +46,7 @@ func (pm *Manager) Enable(name string) error {
 	return nil
 }
 
-// Inspect examines a plugin manifest
+// Inspect examines a plugin config
 func (pm *Manager) Inspect(name string) (tp types.Plugin, err error) {
 	p, err := pm.pluginStore.GetByName(name)
 	if err != nil {
@@ -112,7 +115,7 @@ func (pm *Manager) Push(name string, metaHeader http.Header, authConfig *types.A
 		return err
 	}
 	dest := filepath.Join(pm.libRoot, p.GetID())
-	config, err := ioutil.ReadFile(filepath.Join(dest, "manifest.json"))
+	config, err := ioutil.ReadFile(filepath.Join(dest, "config.json"))
 	if err != nil {
 		return err
 	}
@@ -162,6 +165,7 @@ func (pm *Manager) Remove(name string, config *types.PluginRmConfig) error {
 	}
 
 	pm.pluginStore.Remove(p)
+	os.RemoveAll(filepath.Join(pm.libRoot, p.GetID()))
 	pm.pluginEventLogger(p.GetID(), name, "remove")
 	return nil
 }
@@ -173,4 +177,38 @@ func (pm *Manager) Set(name string, args []string) error {
 		return err
 	}
 	return p.Set(args)
+}
+
+// CreateFromContext creates a plugin from the given pluginDir which contains
+// both the rootfs and the config.json and a repoName with optional tag.
+func (pm *Manager) CreateFromContext(ctx context.Context, tarCtx io.Reader, options *types.PluginCreateOptions) error {
+	pluginID := stringid.GenerateNonCryptoID()
+
+	pluginDir := filepath.Join(pm.libRoot, pluginID)
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		return err
+	}
+
+	if err := chrootarchive.Untar(tarCtx, pluginDir, nil); err != nil {
+		return err
+	}
+
+	repoName := options.RepoName
+	ref, err := distribution.GetRef(repoName)
+	if err != nil {
+		return err
+	}
+	name := ref.Name()
+	tag := distribution.GetTag(ref)
+
+	p := v2.NewPlugin(name, pluginID, pm.runRoot, pm.libRoot, tag)
+	if err := p.InitPlugin(); err != nil {
+		return err
+	}
+
+	pm.pluginStore.Add(p)
+
+	pm.pluginEventLogger(p.GetID(), repoName, "create")
+
+	return nil
 }

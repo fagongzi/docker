@@ -36,23 +36,34 @@ following:
 When using cUrl 7.50 or later:
 
 ```console
-$ curl --unix-socket /var/run/docker.sock http://localhost/containers/json
+$ curl --unix-socket /var/run/docker.sock http://localhost/v1.25/containers/json
 ```
 
 When using cURL 7.40, `localhost` must be omitted:
 
 ```console
-$ curl --unix-socket /var/run/docker.sock http://containers/json
+$ curl --unix-socket /var/run/docker.sock http://v1.25/containers/json
 ```
 
 If you have bound the Docker daemon to a different socket path or TCP
 port, you would reference that in your cURL rather than the
 default.
 
-The current version of the API is v1.25 which means calling `/info` is the same
-as calling `/v1.25/info`. To call an older version of the API use
-`/v1.24/info`. If a newer daemon is installed, new properties may be returned
-even when calling older versions of the API.
+## Versioning
+
+It is required to to supply a version to API calls. This is done by prefixing
+the URL with the version number.
+
+The current version of the API is 1.25, so to call the `/info` endpoint, you
+would send a request to the URL `/v1.25/info`. To call, for example, version
+1.24 of the API instead, you would request `/v1.24/info`.
+
+If a newer daemon is installed, new properties may be returned even when
+calling older versions of the API.
+
+In previous versions of Docker, it was possible to access the API without
+providing a version. This behaviour is now deprecated will be removed in a
+future version of Docker.
 
 Use the table below to find the API version for a Docker version:
 
@@ -97,11 +108,11 @@ API requests, for example:
 curl --insecure \
      --cert $DOCKER_CERT_PATH/cert.pem \
      --key $DOCKER_CERT_PATH/key.pem \
-     https://YOUR_VM_IP:2376/images/json
+     https://YOUR_VM_IP:2376/v1.25/images/json
 
 wget --no-check-certificate --certificate=$DOCKER_CERT_PATH/cert.pem \
      --private-key=$DOCKER_CERT_PATH/key.pem \
-     https://YOUR_VM_IP:2376/images/json -O - -q
+     https://YOUR_VM_IP:2376/v1.25/images/json -O - -q
 ```
 
 ## Docker Events
@@ -130,13 +141,15 @@ This section lists each version from latest to oldest.  Each listing includes a 
 
 [Docker Remote API v1.25](docker_remote_api_v1.25.md) documentation
 
+* The API version is now required in all API calls. Instead of just requesting, for example, the URL `/containers/json`, you must now request `/v1.25/containers/json`.
+* `GET /version` now returns `MinAPIVersion`.
 * `POST /build` accepts `networkmode` parameter to specify network used during build.
 * `GET /images/(name)/json` now returns `OsVersion` if populated
 * `GET /info` now returns `Isolation`.
 * `POST /containers/create` now takes `AutoRemove` in HostConfig, to enable auto-removal of the container on daemon side when the container's process exits.
 * `GET /containers/json` and `GET /containers/(id or name)/json` now return `"removing"` as a value for the `State.Status` field if the container is being removed. Previously, "exited" was returned as status.
 * `GET /containers/json` now accepts `removing` as a valid value for the `status` filter.
-* `GET /containers/json` now supports filtering containers by `health` status. 
+* `GET /containers/json` now supports filtering containers by `health` status.
 * `DELETE /volumes/(name)` now accepts a `force` query parameter to force removal of volumes that were already removed out of band by the volume driver plugin.
 * `POST /containers/create/` and `POST /containers/(name)/update` now validates restart policies.
 * `POST /containers/create` now validates IPAMConfig in NetworkingConfig, and returns error for invalid IPv4 and IPv6 addresses (`--ip` and `--ip6` in `docker create/run`).
@@ -161,6 +174,7 @@ This section lists each version from latest to oldest.  Each listing includes a 
 * `POST /volumes/prune` prunes unused volumes.
 * `POST /networks/prune` prunes unused networks.
 * Every API response now includes a `Docker-Experimental` header specifying if experimental features are enabled (value can be `true` or `false`).
+* Every API response now includes a `API-Version` header specifying the default API version of the server.
 * The `hostConfig` option now accepts the fields `CpuRealtimePeriod` and `CpuRtRuntime` to allocate cpu runtime to rt tasks when `CONFIG_RT_GROUP_SCHED` is enabled in the kernel.
 * The `SecurityOptions` field within the `GET /info` response now includes `userns` if user namespaces are enabled in the daemon.
 * `GET /nodes` and `GET /node/(id or name)` now return `Addr` as part of a node's `Status`, which is the address that that node connects to the manager from.
@@ -168,6 +182,18 @@ This section lists each version from latest to oldest.  Each listing includes a 
 * `GET /info` now returns more structured information about security options.
 * The `HostConfig` field now includes `CpuCount` that represents the number of CPUs available for execution by the container. Windows daemon only.
 * `POST /services/create` and `POST /services/(id or name)/update` now accept the `TTY` parameter, which allocate a pseudo-TTY in container.
+* `POST /services/create` and `POST /services/(id or name)/update` now accept the `DNSConfig` parameter, which specifies DNS related configurations in resolver configuration file (resolv.conf) through `Nameservers`, `Search`, and `Options`.
+* `GET /networks/(id or name)` now includes IP and name of all peers nodes for swarm mode overlay networks.
+* `GET /plugins` list plugins.
+* `POST /plugins/pull?name=<plugin name>` pulls a plugin.
+* `GET /plugins/(plugin name)` inspect a plugin.
+* `POST /plugins/(plugin name)/set` configure a plugin.
+* `POST /plugins/(plugin name)/enable` enable a plugin.
+* `POST /plugins/(plugin name)/disable` disable a plugin.
+* `POST /plugins/(plugin name)/push` push a plugin.
+* `POST /plugins/create?name=(plugin name)` create a plugin.
+* `DELETE /plugins/(plugin name)` delete a plugin.
+
 
 ### v1.24 API changes
 

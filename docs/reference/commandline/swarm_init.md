@@ -22,12 +22,15 @@ Initialize a swarm
 
 Options:
       --advertise-addr value            Advertised address (format: <ip|interface>[:port])
-      --cert-expiry duration            Validity period for node certificates (default 2160h0m0s)
-      --dispatcher-heartbeat duration   Dispatcher heartbeat period (default 5s)
+      --autolock                        Enable manager autolocking (requiring an unlock key to start a stopped manager)
+      --cert-expiry duration            Validity period for node certificates (ns|us|ms|s|m|h) (default 2160h0m0s)
+      --dispatcher-heartbeat duration   Dispatcher heartbeat period (ns|us|ms|s|m|h) (default 5s)
       --external-ca value               Specifications of one or more certificate signing endpoints
       --force-new-cluster               Force create a new cluster from current state
       --help                            Print usage
       --listen-addr value               Listen address (format: <ip|interface>[:port])
+      --max-snapshots int               Number of additional Raft snapshots to retain
+      --snapshot-interval int           Number of log entries between Raft snapshots
       --task-history-limit int          Task history retention limit (default 5)
 ```
 
@@ -55,6 +58,18 @@ to [swarm join](swarm_join.md).
 After you create the swarm, you can display or rotate the token using
 [swarm join-token](swarm_join_token.md).
 
+### `--autolock`
+
+This flag enables automatic locking of managers with an encryption key. The
+private keys and data stored by all managers will be protected by the
+encryption key printed in the output, and will not be accessible without it.
+Thus, it is very important to store this key in order to activate a manager
+after it restarts. The key can be passed to `docker swarm unlock` to reactivate
+the manager. Autolock can be disabled by running
+`docker swarm update --autolock=false`. After disabling it, the encryption key
+is no longer required to start the manager, and it will start up on its own
+without user intervention.
+
 ### `--cert-expiry`
 
 This flag sets the validity period for node certificates.
@@ -64,7 +79,7 @@ This flag sets the validity period for node certificates.
 This flags sets the frequency with which nodes are told to use as a
 period to report their health.
 
-### `--external-ca value`
+### `--external-ca`
 
 This flag sets up the swarm to use an external CA to issue node certificates. The value takes
 the form `protocol=X,url=Y`. The value for `protocol` specifies what protocol should be used
@@ -75,7 +90,7 @@ The URL specifies the endpoint where signing requests should be submitted.
 
 This flag forces an existing node that was part of a quorum that was lost to restart as a single node Manager without losing its data.
 
-### `--listen-addr value`
+### `--listen-addr`
 
 The node listens for inbound swarm manager traffic on this address. The default is to listen on
 0.0.0.0:2377. It is also possible to specify a network interface to listen on that interface's
@@ -84,7 +99,7 @@ address; for example `--listen-addr eth0:2377`.
 Specifying a port is optional. If the value is a bare IP address or interface
 name, the default port 2377 will be used.
 
-### `--advertise-addr value`
+### `--advertise-addr`
 
 This flag specifies the address that will be advertised to other members of the
 swarm for API access and overlay networking. If unspecified, Docker will check
@@ -102,6 +117,21 @@ name, the default port 2377 will be used.
 ### `--task-history-limit`
 
 This flag sets up task history retention limit.
+
+### `--max-snapshots`
+
+This flag sets the number of old Raft snapshots to retain in addition to the
+current Raft snapshots. By default, no old snapshots are retained. This option
+may be used for debugging, or to store old snapshots of the swarm state for
+disaster recovery purposes.
+
+### `--snapshot-interval`
+
+This flag specifies how many log entries to allow in between Raft snapshots.
+Setting this to a higher number will trigger snapshots less frequently.
+Snapshots compact the Raft log and allow for more efficient transfer of the
+state to new managers. However, there is a performance cost to taking snapshots
+frequently.
 
 ## Related information
 

@@ -19,6 +19,7 @@ import (
 	containertypes "github.com/docker/docker/api/types/container"
 	mounttypes "github.com/docker/docker/api/types/mount"
 	networktypes "github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/container/stream"
 	"github.com/docker/docker/daemon/exec"
 	"github.com/docker/docker/daemon/logger"
 	"github.com/docker/docker/daemon/logger/jsonfilelog"
@@ -65,7 +66,7 @@ func (DetachError) Error() string {
 // CommonContainer holds the fields for a container which are
 // applicable across all platforms supported by the daemon.
 type CommonContainer struct {
-	*runconfig.StreamConfig
+	StreamConfig *stream.Config
 	// embed for Container to support states directly.
 	*State          `json:"State"` // Needed for remote api version <= 1.11
 	Root            string         `json:"-"` // Path to the "home" of the container, including metadata.
@@ -89,8 +90,9 @@ type CommonContainer struct {
 	HasBeenStartedBefore   bool
 	HasBeenManuallyStopped bool // used for unless-stopped restart policy
 	MountPoints            map[string]*volume.MountPoint
-	HostConfig             *containertypes.HostConfig `json:"-"` // do not serialize the host config in the json, otherwise we'll make the container unportable
-	ExecCommands           *exec.Store                `json:"-"`
+	HostConfig             *containertypes.HostConfig        `json:"-"` // do not serialize the host config in the json, otherwise we'll make the container unportable
+	ExecCommands           *exec.Store                       `json:"-"`
+	Secrets                []*containertypes.ContainerSecret `json:"-"` // do not serialize
 	// logDriver for closing
 	LogDriver      logger.Logger  `json:"-"`
 	LogCopier      *logger.Copier `json:"-"`
@@ -108,7 +110,7 @@ func NewBaseContainer(id, root string) *Container {
 			ExecCommands:  exec.NewStore(),
 			Root:          root,
 			MountPoints:   make(map[string]*volume.MountPoint),
-			StreamConfig:  runconfig.NewStreamConfig(),
+			StreamConfig:  stream.NewConfig(),
 			attachContext: &attachContext{},
 		},
 	}
@@ -376,7 +378,7 @@ func (container *Container) Attach(stdin io.ReadCloser, stdout io.Writer, stderr
 
 // AttachStreams connects streams to a TTY.
 // Used by exec too. Should this move somewhere else?
-func AttachStreams(ctx context.Context, streamConfig *runconfig.StreamConfig, openStdin, stdinOnce, tty bool, stdin io.ReadCloser, stdout io.Writer, stderr io.Writer, keys []byte) chan error {
+func AttachStreams(ctx context.Context, streamConfig *stream.Config, openStdin, stdinOnce, tty bool, stdin io.ReadCloser, stdout io.Writer, stderr io.Writer, keys []byte) chan error {
 	var (
 		cStdout, cStderr io.ReadCloser
 		cStdin           io.WriteCloser
@@ -564,6 +566,32 @@ func (container *Container) AddMountPointWithVolume(destination string, vol volu
 		Volume:      vol,
 		CopyData:    volume.DefaultCopyMode,
 	}
+}
+
+// UnmountVolumes unmounts all volumes
+func (container *Container) UnmountVolumes(volumeEventLog func(name, action string, attributes map[string]string)) error {
+	var errors []string
+	for _, volumeMount := range container.MountPoints {
+		// Check if the mounpoint has an ID, this is currently the best way to tell if it's actually mounted
+		// TODO(cpuguyh83): there should be a better way to handle this
+		if volumeMount.Volume != nil && volumeMount.ID != "" {
+			if err := volumeMount.Volume.Unmount(volumeMount.ID); err != nil {
+				errors = append(errors, err.Error())
+				continue
+			}
+			volumeMount.ID = ""
+
+			attributes := map[string]string{
+				"driver":    volumeMount.Volume.DriverName(),
+				"container": container.ID,
+			}
+			volumeEventLog(volumeMount.Volume.Name(), "unmount", attributes)
+		}
+	}
+	if len(errors) > 0 {
+		return fmt.Errorf("error while unmounting volumes for container %s: %s", container.ID, strings.Join(errors, "; "))
+	}
+	return nil
 }
 
 // IsDestinationMounted checks whether a path is mounted on the container or not.
@@ -1037,6 +1065,26 @@ func (container *Container) startLogging() error {
 	return nil
 }
 
+// StdinPipe gets the stdin stream of the container
+func (container *Container) StdinPipe() io.WriteCloser {
+	return container.StreamConfig.StdinPipe()
+}
+
+// StdoutPipe gets the stdout stream of the container
+func (container *Container) StdoutPipe() io.ReadCloser {
+	return container.StreamConfig.StdoutPipe()
+}
+
+// StderrPipe gets the stderr stream of the container
+func (container *Container) StderrPipe() io.ReadCloser {
+	return container.StreamConfig.StderrPipe()
+}
+
+// CloseStreams closes the container's stdio streams
+func (container *Container) CloseStreams() error {
+	return container.StreamConfig.CloseStreams()
+}
+
 // InitializeStdio is called by libcontainerd to connect the stdio.
 func (container *Container) InitializeStdio(iop libcontainerd.IOPipe) error {
 	if err := container.startLogging(); err != nil {
@@ -1046,7 +1094,7 @@ func (container *Container) InitializeStdio(iop libcontainerd.IOPipe) error {
 
 	container.StreamConfig.CopyToPipe(iop)
 
-	if container.Stdin() == nil && !container.Config.Tty {
+	if container.StreamConfig.Stdin() == nil && !container.Config.Tty {
 		if iop.Stdin != nil {
 			if err := iop.Stdin.Close(); err != nil {
 				logrus.Warnf("error closing stdin: %+v", err)

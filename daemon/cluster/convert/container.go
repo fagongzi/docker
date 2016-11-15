@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Sirupsen/logrus"
 	container "github.com/docker/docker/api/types/container"
 	mounttypes "github.com/docker/docker/api/types/mount"
 	types "github.com/docker/docker/api/types/swarm"
@@ -13,16 +14,27 @@ import (
 
 func containerSpecFromGRPC(c *swarmapi.ContainerSpec) types.ContainerSpec {
 	containerSpec := types.ContainerSpec{
-		Image:    c.Image,
-		Labels:   c.Labels,
-		Command:  c.Command,
-		Args:     c.Args,
-		Hostname: c.Hostname,
-		Env:      c.Env,
-		Dir:      c.Dir,
-		User:     c.User,
-		Groups:   c.Groups,
-		TTY:      c.TTY,
+		Image:     c.Image,
+		Labels:    c.Labels,
+		Command:   c.Command,
+		Args:      c.Args,
+		Hostname:  c.Hostname,
+		Env:       c.Env,
+		Dir:       c.Dir,
+		User:      c.User,
+		Groups:    c.Groups,
+		TTY:       c.TTY,
+		OpenStdin: c.OpenStdin,
+		Hosts:     c.Hosts,
+		Secrets:   secretReferencesFromGRPC(c.Secrets),
+	}
+
+	if c.DNSConfig != nil {
+		containerSpec.DNSConfig = &types.DNSConfig{
+			Nameservers: c.DNSConfig.Nameservers,
+			Search:      c.DNSConfig.Search,
+			Options:     c.DNSConfig.Options,
+		}
 	}
 
 	// Mounts
@@ -67,18 +79,72 @@ func containerSpecFromGRPC(c *swarmapi.ContainerSpec) types.ContainerSpec {
 	return containerSpec
 }
 
+func secretReferencesToGRPC(sr []*types.SecretReference) []*swarmapi.SecretReference {
+	refs := make([]*swarmapi.SecretReference, 0, len(sr))
+	for _, s := range sr {
+		refs = append(refs, &swarmapi.SecretReference{
+			SecretID:   s.SecretID,
+			SecretName: s.SecretName,
+			Target: &swarmapi.SecretReference_File{
+				File: &swarmapi.SecretReference_FileTarget{
+					Name: s.Target.Name,
+					UID:  s.Target.UID,
+					GID:  s.Target.GID,
+					Mode: s.Target.Mode,
+				},
+			},
+		})
+	}
+
+	return refs
+}
+func secretReferencesFromGRPC(sr []*swarmapi.SecretReference) []*types.SecretReference {
+	refs := make([]*types.SecretReference, 0, len(sr))
+	for _, s := range sr {
+		target := s.GetFile()
+		if target == nil {
+			// not a file target
+			logrus.Warnf("secret target not a file: secret=%s", s.SecretID)
+			continue
+		}
+		refs = append(refs, &types.SecretReference{
+			SecretID:   s.SecretID,
+			SecretName: s.SecretName,
+			Target: &types.SecretReferenceFileTarget{
+				Name: target.Name,
+				UID:  target.UID,
+				GID:  target.GID,
+				Mode: target.Mode,
+			},
+		})
+	}
+
+	return refs
+}
+
 func containerToGRPC(c types.ContainerSpec) (*swarmapi.ContainerSpec, error) {
 	containerSpec := &swarmapi.ContainerSpec{
-		Image:    c.Image,
-		Labels:   c.Labels,
-		Command:  c.Command,
-		Args:     c.Args,
-		Hostname: c.Hostname,
-		Env:      c.Env,
-		Dir:      c.Dir,
-		User:     c.User,
-		Groups:   c.Groups,
-		TTY:      c.TTY,
+		Image:     c.Image,
+		Labels:    c.Labels,
+		Command:   c.Command,
+		Args:      c.Args,
+		Hostname:  c.Hostname,
+		Env:       c.Env,
+		Dir:       c.Dir,
+		User:      c.User,
+		Groups:    c.Groups,
+		TTY:       c.TTY,
+		OpenStdin: c.OpenStdin,
+		Hosts:     c.Hosts,
+		Secrets:   secretReferencesToGRPC(c.Secrets),
+	}
+
+	if c.DNSConfig != nil {
+		containerSpec.DNSConfig = &swarmapi.ContainerSpec_DNSConfig{
+			Nameservers: c.DNSConfig.Nameservers,
+			Search:      c.DNSConfig.Search,
+			Options:     c.DNSConfig.Options,
+		}
 	}
 
 	if c.StopGracePeriod != nil {

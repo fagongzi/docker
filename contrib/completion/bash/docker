@@ -1121,7 +1121,7 @@ _docker_container_ls() {
 
 	case "$prev" in
 		--filter|-f)
-			COMPREPLY=( $( compgen -S = -W "ancestor before exited health id label name network since status volume" -- "$cur" ) )
+			COMPREPLY=( $( compgen -S = -W "ancestor before exited health id is-task label name network since status volume" -- "$cur" ) )
 			__docker_nospace
 			return
 			;;
@@ -1248,7 +1248,7 @@ _docker_container_run() {
 		--device-write-bps
 		--device-write-iops
 		--dns
-		--dns-opt
+		--dns-option
 		--dns-search
 		--entrypoint
 		--env -e
@@ -1704,6 +1704,7 @@ _docker_daemon() {
 		--oom-score-adjust
 		--pidfile -p
 		--registry-mirror
+		--seccomp-profile
 		--shutdown-timeout
 		--storage-driver -s
 		--storage-opt
@@ -1816,6 +1817,10 @@ _docker_daemon() {
 			__docker_complete_log_options
 			return
 			;;
+		--seccomp-profile)
+			_filedir json
+			return
+			;;
 		--userns-remap)
 			__docker_complete_user_group
 			return
@@ -1896,6 +1901,7 @@ _docker_image() {
 _docker_image_build() {
 	local options_with_args="
 		--build-arg
+		--cache-from
 		--cgroup-parent
 		--cpuset-cpus
 		--cpuset-mems
@@ -1929,6 +1935,10 @@ _docker_image_build() {
 		--build-arg)
 			COMPREPLY=( $( compgen -e -- "$cur" ) )
 			__docker_nospace
+			return
+			;;
+		--cache-from)
+			__docker_complete_image_repos_and_tags
 			return
 			;;
 		--file|-f)
@@ -2577,7 +2587,7 @@ _docker_service_ps() {
 
 	case "$cur" in
 		-*)
-			COMPREPLY=( $( compgen -W "--filter -f --help --no-resolve --no-trunc --quiet -q" -- "$cur" ) )
+			COMPREPLY=( $( compgen -W "--all -a --filter -f --help --no-resolve --no-trunc --quiet -q" -- "$cur" ) )
 			;;
 		*)
 			local counter=$(__docker_pos_first_nonflag '--filter|-f')
@@ -2629,6 +2639,7 @@ _docker_service_update() {
 
 	local boolean_options="
 		--help
+		--tty -t
 		--with-registry-auth
 	"
 
@@ -2637,11 +2648,15 @@ _docker_service_update() {
 	if [ "$subcommand" = "create" ] ; then
 		options_with_args="$options_with_args
 			--container-label
+			--dns
+			--dns-option
+			--dns-search
 			--env-file
 			--group
 			--hostname
 			--mode
 			--name
+			--port
 		"
 
 		case "$prev" in
@@ -2664,9 +2679,17 @@ _docker_service_update() {
 			--arg
 			--container-label-add
 			--container-label-rm
+			--dns-add
+			--dns-option-add
+			--dns-option-rm
+			--dns-rm
+			--dns-search-add
+			--dns-search-rm
 			--group-add
 			--group-rm
 			--image
+			--port-add
+			--port-rm
 		"
 
 		case "$prev" in
@@ -2833,21 +2856,21 @@ _docker_swarm_join-token() {
 _docker_swarm_leave() {
 	case "$cur" in
 		-*)
-			COMPREPLY=( $( compgen -W "--force --help" -- "$cur" ) )
+			COMPREPLY=( $( compgen -W "--force -f --help" -- "$cur" ) )
 			;;
 	esac
 }
 
 _docker_swarm_update() {
 	case "$prev" in
-		--cert-expiry|--dispatcher-heartbeat|--task-history-limit)
+		--cert-expiry|--dispatcher-heartbeat|--max-snapshots|--snapshot-interval|--task-history-limit)
 			return
 			;;
 	esac
 
 	case "$cur" in
 		-*)
-			COMPREPLY=( $( compgen -W "--cert-expiry --dispatcher-heartbeat --help --task-history-limit" -- "$cur" ) )
+			COMPREPLY=( $( compgen -W "--cert-expiry --dispatcher-heartbeat --help --max-snapshots --snapshot-interval --task-history-limit" -- "$cur" ) )
 			;;
 	esac
 }
@@ -2949,7 +2972,7 @@ _docker_node_remove() {
 _docker_node_rm() {
 	case "$cur" in
 		-*)
-			COMPREPLY=( $( compgen -W "--force --help" -- "$cur" ) )
+			COMPREPLY=( $( compgen -W "--force -f --help" -- "$cur" ) )
 			;;
 		*)
 			__docker_complete_nodes

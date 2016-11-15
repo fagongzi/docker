@@ -596,7 +596,7 @@ func (daemon *Daemon) populateCommonSpec(s *specs.Spec, c *container.Container) 
 			s.Process.Args = append([]string{"/dev/init", c.Path}, c.Args...)
 			var path string
 			if daemon.configStore.InitPath == "" && c.HostConfig.InitPath == "" {
-				path, err = exec.LookPath("docker-init")
+				path, err = exec.LookPath(DefaultInitBinary)
 				if err != nil {
 					return err
 				}
@@ -702,16 +702,27 @@ func (daemon *Daemon) createSpec(c *container.Container) (*specs.Spec, error) {
 		return nil, err
 	}
 
+	if err := daemon.setupSecretDir(c); err != nil {
+		return nil, err
+	}
+
 	ms, err := daemon.setupMounts(c)
 	if err != nil {
 		return nil, err
 	}
+
 	ms = append(ms, c.IpcMounts()...)
+
 	tmpfsMounts, err := c.TmpfsMounts()
 	if err != nil {
 		return nil, err
 	}
 	ms = append(ms, tmpfsMounts...)
+
+	if m := c.SecretMount(); m != nil {
+		ms = append(ms, *m)
+	}
+
 	sort.Sort(mounts(ms))
 	if err := setMounts(daemon, &s, c, ms); err != nil {
 		return nil, fmt.Errorf("linux mounts: %v", err)

@@ -186,6 +186,9 @@ message ContainerSpec {
 	// including stdin if it is still open.
 	bool tty = 13 [(gogoproto.customname) = "TTY"];
 
+	// OpenStdin declares that the standard input (stdin) should be open.
+	bool open_stdin = 18;
+
 	repeated Mount mounts = 8 [(gogoproto.nullable) = false];
 
 	// StopGracePeriod the grace period for stopping the container before
@@ -207,6 +210,18 @@ message ContainerSpec {
 	// SecretReference contains references to zero or more secrets that
 	// will be exposed to the container.
 	repeated SecretReference secrets = 12;
+
+	// Hosts allow additional entries to be specified in /etc/hosts
+	// that associates IP addresses with hostnames.
+	// Detailed documentation is available in:
+	// http://man7.org/linux/man-pages/man5/hosts.5.html
+	//   IP_address canonical_hostname [aliases...]
+	//
+	// The format of the Hosts in swarmkit follows the same as
+	// above.
+	// This is different from `docker run --add-host <hostname>:<ip>`
+	// where format is `<hostname>:<ip>`
+	repeated string hosts = 17;
 
 	// DNSConfig specifies DNS related configurations in resolver configuration file (resolv.conf)
 	// Detailed documentation is available in:
@@ -313,6 +328,9 @@ message ClusterSpec {
 
 	// TaskDefaults specifies the default values to use for task creation.
 	TaskDefaults task_defaults = 7 [(gogoproto.nullable) = false];
+
+	// EncryptionConfig defines the cluster's encryption settings.
+	EncryptionConfig encryption_config = 8 [(gogoproto.nullable) = false];
 }
 
 // SecretSpec specifies a user-provided secret.

@@ -2,12 +2,7 @@
 set -e
 set -x
 
-TOMLV_COMMIT=9baf8a8a9f2ed20a8e54160840c492f937eeaf9a
-RUNC_COMMIT=ac031b5bf1cc92239461125f4c1ffb760522bbf2
-CONTAINERD_COMMIT=52ef1ceb4b660c42cf4ea9013180a5663968d4c7
-GRIMES_COMMIT=fe069a03affd2547fdb05e5b8b07202d2e41735b
-LIBNETWORK_COMMIT=0f534354b813003a754606689722fe253101bc4e
-VNDR_COMMIT=f56bd4504b4fad07a357913687fb652ee54bb3b0
+. $(dirname "$0")/binaries-commits
 
 RM_GOPATH=0
 
@@ -77,13 +72,14 @@ do
 			install_containerd
 			;;
 
-		grimes)
-			echo "Install grimes version $GRIMES_COMMIT"
-			git clone https://github.com/crosbymichael/grimes.git "$GOPATH/grimes"
-			cd "$GOPATH/grimes"
-			git checkout -q "$GRIMES_COMMIT"
-			make
-			cp init /usr/local/bin/docker-init
+		tini)
+			echo "Install tini version $TINI_COMMIT"
+			git clone https://github.com/krallin/tini.git "$GOPATH/tini"
+			cd "$GOPATH/tini"
+			git checkout -q "$TINI_COMMIT"
+			cmake -DMINIMAL=ON .
+			make tini-static
+			cp tini-static /usr/local/bin/docker-init
 			;;
 
 		proxy)
@@ -104,7 +100,7 @@ do
 			;;
 
 		*)
-			echo echo "Usage: $0 [tomlv|runc|containerd|grimes|proxy]"
+			echo echo "Usage: $0 [tomlv|runc|containerd|tini|proxy]"
 			exit 1
 
 	esac

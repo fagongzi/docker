@@ -113,6 +113,7 @@ func NewBuildCommand(dockerCli *command.DockerCli) *cobra.Command {
 
 	flags.BoolVar(&options.squash, "squash", false, "Squash newly built layers into a single new layer")
 	flags.SetAnnotation("squash", "experimental", nil)
+	flags.SetAnnotation("squash", "version", []string{"1.25"})
 
 	return cmd
 }
@@ -136,13 +137,8 @@ func (out *lastProgressOutput) WriteProgress(prog progress.Progress) error {
 func runBuild(dockerCli *command.DockerCli, options buildOptions) error {
 
 	var (
-		buildCtx io.ReadCloser
-		err      error
-	)
-
-	specifiedContext := options.context
-
-	var (
+		buildCtx      io.ReadCloser
+		err           error
 		contextDir    string
 		tempDir       string
 		relDockerfile string
@@ -150,6 +146,7 @@ func runBuild(dockerCli *command.DockerCli, options buildOptions) error {
 		buildBuff     io.Writer
 	)
 
+	specifiedContext := options.context
 	progBuff = dockerCli.Out()
 	buildBuff = dockerCli.Out()
 	if options.quiet {
